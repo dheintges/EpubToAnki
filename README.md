@@ -19,8 +19,16 @@ Pipeline:
 
 ```bash
 pip install -r requirements.txt
-python -m spacy download en_core_web_sm
+python -m spacy download en_core_web_sm   # optional: the GUI can download models too
 ```
+
+The app starts fine **without** any spaCy model installed — models are loaded
+lazily, only when you press *Analyze*. In the GUI (section **2 · Analysis**) you
+can pick any installed model or type a model name (e.g. `fr_core_news_sm` for
+French, `de_core_news_sm` for German) and press **Download model** to install it
+(`python -m spacy download <model>` runs in the background), then **Refresh
+models** to see it. If the selected model is missing, Analyze shows a warning
+instead of crashing.
 
 ## Run
 
@@ -29,6 +37,20 @@ python app.py
 ```
 
 Then open http://127.0.0.1:8080 in your browser.
+
+## Debugging
+
+- The UI has a **Log** panel (expand it at the bottom) — upload starts, extraction
+  results, model downloads and all errors (with tracebacks) are logged there.
+- Run `python app.py` from a terminal to see full tracebacks in the console.
+- After an upload, the line under the upload button shows either
+  `Loaded: <file> (<KB>, <chars>)` or `Failed to load <file> — see Log`.
+- If an eBook fails to load, the log shows the exact parser error. epub files are
+  parsed by reading the OPF spine directly (epub2/epub3, no NCX needed), with
+  ebooklib as a fallback; PDFs use pypdf (scanned/image-only PDFs yield no text).
+- `python tests_smoke.py` runs the end-to-end smoke tests (reader incl. an
+  epub3-without-NCX fixture, analyzer, translator logic, and the Anki flow against
+  a fake AnkiConnect server).
 
 ## Anki setup
 
@@ -62,6 +84,7 @@ core/anki.py         async AnkiConnect client (find, check, add notes)
 - The free Google provider uses the unofficial endpoint behind `deep-translator` and
   may rate-limit on very large word lists; the app retries and continues on errors.
   For production-quality translation, use the `deepl` provider with your API key.
-- spaCy's English model is used for lemmatization. For other source languages,
-  download the matching model (e.g. `de_core_news_sm`) and adjust
-  `core/analyzer.py:get_nlp`.
+- Lemmatization uses the spaCy model selected in the GUI (default
+  `en_core_web_sm`). For other source languages, download the matching model in
+  the GUI — e.g. `fr_core_news_sm` for French — and set the source language
+  accordingly. Model names follow the pattern `<lang>_core_news_sm`.
