@@ -37,6 +37,30 @@ def make_epub() -> bytes:
     return buf.getvalue()
 
 
+def make_epub3_no_ncx() -> bytes:
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr("META-INF/container.xml", """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>""")
+        z.writestr("OEBPS/content.opf", """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title><dc:identifier id="id">x</dc:identifier></metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="c1"/></spine>
+</package>""")
+        z.writestr("OEBPS/nav.xhtml", '<html xmlns="http://www.w3.org/1999/xhtml"><body><nav><ol><li><a href="ch1.xhtml">Ch1</a></li></ol></nav></body></html>')
+        z.writestr("OEBPS/ch1.xhtml", '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>The runner runs fast in Paris. Bonjour le monde.</p></body></html>')
+    return buf.getvalue()
+
+
 def make_pdf() -> bytes:
     content = b"BT /F1 24 Tf 100 700 Td (Hello running world from PDF) Tj ET"
     objs = [
@@ -108,7 +132,14 @@ def test_reader():
     assert "runner" in epub_txt and "<p>" not in epub_txt, epub_txt
     pdf_txt = extract_text(make_pdf(), ".pdf")
     assert "running" in pdf_txt, repr(pdf_txt)
-    print("reader OK | pdf text:", repr(pdf_txt.strip()))
+    epub3 = extract_text(make_epub3_no_ncx(), ".epub")
+    assert "Bonjour le monde" in epub3 and "Ch1" not in epub3, repr(epub3[:200])
+    try:
+        extract_text(b"not a zip", ".epub")
+        raise AssertionError("broken epub should raise")
+    except ValueError as exc:
+        assert "Could not parse epub" in str(exc)
+    print("reader OK | pdf text:", repr(pdf_txt.strip()), "| epub3-no-ncx OK")
 
 
 def test_analyzer():
@@ -134,6 +165,12 @@ def test_models():
         raise AssertionError("missing model should raise")
     except ModelNotInstalledError as exc:
         assert "python -m spacy download" in str(exc)
+    from core.analyzer import download_model
+    try:
+        download_model("definitely_not_a_real_model_xyz")
+        raise AssertionError("bad download should raise")
+    except RuntimeError as exc:
+        assert "failed" in str(exc).lower()
     counter = count_lemmas("He runs and ran.", nlp=nlp)
     assert counter["run"] == 2
     print("models OK | installed:", models)

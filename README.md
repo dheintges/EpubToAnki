@@ -38,6 +38,20 @@ python app.py
 
 Then open http://127.0.0.1:8080 in your browser.
 
+## Debugging
+
+- The UI has a **Log** panel (expand it at the bottom) — upload starts, extraction
+  results, model downloads and all errors (with tracebacks) are logged there.
+- Run `python app.py` from a terminal to see full tracebacks in the console.
+- After an upload, the line under the upload button shows either
+  `Loaded: <file> (<KB>, <chars>)` or `Failed to load <file> — see Log`.
+- If an eBook fails to load, the log shows the exact parser error. epub files are
+  parsed by reading the OPF spine directly (epub2/epub3, no NCX needed), with
+  ebooklib as a fallback; PDFs use pypdf (scanned/image-only PDFs yield no text).
+- `python tests_smoke.py` runs the end-to-end smoke tests (reader incl. an
+  epub3-without-NCX fixture, analyzer, translator logic, and the Anki flow against
+  a fake AnkiConnect server).
+
 ## Anki setup
 
 - Install the **AnkiConnect** add-on in Anki (Tools → Add-ons → Get Add-ons → code `2055492159`), then restart Anki.

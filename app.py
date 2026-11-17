@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import traceback
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -84,7 +85,14 @@ async def load_file(name: str, data: bytes) -> None:
     if suffix not in SUPPORTED_SUFFIXES:
         ui.notify(f"Unsupported format {suffix!r}. Supported: {sorted(SUPPORTED_SUFFIXES)}", type="negative")
         return
-    state.text = extract_text(data, suffix)
+    try:
+        text = extract_text(data, suffix)
+    except Exception as exc:
+        log(f"Failed to extract {name}: {exc}\n{traceback.format_exc()}")
+        file_label.text = f"Failed to load {name} — see Log"
+        ui.notify(f"Could not read {name}: {exc}", type="negative", timeout=10000)
+        return
+    state.text = text
     state.filename = name
     state.counter.clear()
     state.words = []
@@ -97,9 +105,17 @@ async def load_file(name: str, data: bytes) -> None:
     ui.notify(f"Loaded {name}", type="positive")
 
 
+def on_begin_upload(e) -> None:
+    log(f"Upload started: {e.name}")
+
+
 async def on_upload(e) -> None:
-    data = e.content.read()
-    await load_file(e.name, data)
+    try:
+        data = e.content.read()
+        await load_file(e.name, data)
+    except Exception as exc:
+        log(f"Upload failed for {e.name}: {exc}\n{traceback.format_exc()}")
+        ui.notify(f"Upload failed: {exc}", type="negative", timeout=10000)
 
 
 def load_sample() -> None:
@@ -117,15 +133,15 @@ def load_sample() -> None:
 
 def refresh_models() -> None:
     models = installed_models()
-    spacy_model_select.options = models
-    if not spacy_model_select.value or spacy_model_select.value not in models:
-        spacy_model_select.value = DEFAULT_MODEL if DEFAULT_MODEL in models else (models[0] if models else DEFAULT_MODEL)
-    spacy_model_select.update()
+    installed_select.options = models
+    if models and installed_select.value not in models:
+        installed_select.value = models[0]
+    installed_select.update()
     log(f"Installed spaCy models: {models or 'none'}")
 
 
 async def do_download_model() -> None:
-    name = (spacy_model_select.value or "").strip()
+    name = (spacy_model_input.value or "").strip()
     if not name:
         ui.notify("Enter a model name first (e.g. fr_core_news_sm).", type="warning")
         return
@@ -133,13 +149,15 @@ async def do_download_model() -> None:
     log(f"Downloading spaCy model {name!r} (python -m spacy download {name})...")
     try:
         output = await run.io_bound(download_model, name)
-        log("Download finished. " + output.strip().splitlines()[-1] if output.strip() else "Download finished.")
+        last = output.strip().splitlines()[-1] if output.strip() else ""
+        log(f"Download finished. {last}")
         refresh_models()
-        spacy_model_select.value = name
-        spacy_model_select.update()
+        if name in installed_models():
+            installed_select.value = name
+            installed_select.update()
         ui.notify(f"Model {name} installed", type="positive")
     except Exception as exc:
-        log(f"Model download failed: {exc}")
+        log(f"Model download failed: {exc}\n{traceback.format_exc()}")
         ui.notify(f"Download failed: {exc}", type="negative", timeout=10000)
     finally:
         set_busy(False)
@@ -153,7 +171,7 @@ async def do_analyze() -> None:
     log("Analyzing text (tokenize + lemmatize with spaCy)...")
     progress.value = 0
     try:
-        model_name = (spacy_model_select.value or DEFAULT_MODEL).strip()
+        model_name = (spacy_model_input.value or DEFAULT_MODEL).strip()
         try:
             nlp = await run.io_bound(load_model, model_name)
         except ModelNotInstalledError as exc:
@@ -182,8 +200,8 @@ async def do_analyze() -> None:
         refresh_table()
         ui.notify(f"Analysis done: {len(state.words)} unique lemmas", type="positive")
     except Exception as exc:
-        log(f"Analysis failed: {exc}")
-        ui.notify(f"Analysis failed: {exc}", type="negative")
+        log(f"Analysis failed: {exc}\n{traceback.format_exc()}")
+        ui.notify(f"Analysis failed: {exc}", type="negative", timeout=10000)
     finally:
         set_busy(False)
 
@@ -375,12 +393,19 @@ with ui.row().classes("w-full gap-4 items-start"):
         file_label = ui.label("No file loaded").classes("text-sm opacity-70")
         with ui.row().classes("w-full"):
             ui.upload(label="Upload eBook (.pdf/.epub/.txt)", auto_upload=True,
-                      max_file_size=100 * 1024 * 1024, on_upload=on_upload).classes("w-full")
+                      max_file_size=100 * 1024 * 1024, on_begin_upload=on_begin_upload,
+                      on_upload=on_upload).classes("w-full")
         ui.button("Load sample text", on_click=load_sample).props("outline")
 
         ui.separator()
         ui.label("2 · Analysis").classes("text-lg font-semibold")
-        spacy_model_select = ui.select([], label="spaCy model", with_input=True).classes("w-full")
+        spacy_model_input = ui.input("spaCy model", value=DEFAULT_MODEL).classes("w-full")
+        installed_select = ui.select([], label="Installed models (click to use)").classes("w-full")
+
+        def pick_installed(e) -> None:
+            spacy_model_input.value = e.value
+
+        installed_select.on_value_change(pick_installed)
         with ui.row().classes("w-full"):
             ui.button("Refresh models", on_click=refresh_models).props("outline size=sm")
             ui.button("Download model", on_click=do_download_model).props("outline size=sm")
