@@ -1,21 +1,59 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from collections import Counter
 from typing import Callable, Iterable
 
-import spacy
-
-_NLP = None
+DEFAULT_MODEL = "en_core_web_sm"
 
 # Approximate character size of one processing chunk; split on whitespace so words are never cut.
 CHUNK_SIZE = 100_000
 
+_NLP_CACHE: dict = {}
 
-def get_nlp():
-    global _NLP
-    if _NLP is None:
-        _NLP = spacy.load("en_core_web_sm", disable=["ner", "parser", "senter"])
-    return _NLP
+
+class ModelNotInstalledError(RuntimeError):
+    pass
+
+
+def installed_models() -> list[str]:
+    import spacy.util
+
+    return sorted(spacy.util.get_installed_models())
+
+
+def download_model(name: str) -> str:
+    """Download a spaCy model package via `python -m spacy download <name>`. Returns the output."""
+    proc = subprocess.run(
+        [sys.executable, "-m", "spacy", "download", name],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        tail = (proc.stdout + proc.stderr)[-2000:]
+        raise RuntimeError(f"Download of spaCy model {name!r} failed:\n{tail}")
+    return proc.stdout
+
+
+def load_model(name: str = DEFAULT_MODEL):
+    """Load (and cache) an installed spaCy model. Raises ModelNotInstalledError if missing."""
+    if name in _NLP_CACHE:
+        return _NLP_CACHE[name]
+    import spacy
+
+    if name not in spacy.util.get_installed_models():
+        raise ModelNotInstalledError(
+            f"spaCy model {name!r} is not installed. "
+            f"Download it with: python -m spacy download {name}"
+        )
+    nlp = spacy.load(name, disable=["ner", "parser", "senter"])
+    _NLP_CACHE[name] = nlp
+    return nlp
+
+
+def get_nlp(model: str = DEFAULT_MODEL):
+    return load_model(model)
 
 
 def chunk_text(text: str, size: int = CHUNK_SIZE) -> Iterable[str]:
@@ -34,6 +72,7 @@ def chunk_text(text: str, size: int = CHUNK_SIZE) -> Iterable[str]:
 def count_lemmas(
     text: str,
     *,
+    nlp=None,
     drop_propn: bool = True,
     drop_stopwords: bool = False,
     min_len: int = 2,
@@ -42,9 +81,12 @@ def count_lemmas(
     """Tokenize + lemmatize text and return a Counter of lemma frequencies.
 
     Only alphabetic tokens are kept (numbers/punctuation dropped), lemmas are
-    lowercased, and 'running'/'ran'/'runs' all count as 'run'.
+    lowercased, and 'running'/'ran'/'runs' all count as 'run'. Pass an explicit
+    `nlp` (from load_model) to use a non-default model; otherwise the default
+    model is loaded lazily.
     """
-    nlp = get_nlp()
+    if nlp is None:
+        nlp = get_nlp()
     counter: Counter = Counter()
     chunks = list(chunk_text(text))
     total = max(len(chunks), 1)

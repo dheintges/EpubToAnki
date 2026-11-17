@@ -8,7 +8,16 @@ from dataclasses import dataclass, field
 
 from nicegui import app, run, ui
 
-from core.analyzer import chunk_text, count_lemmas, get_nlp, top_words
+from core.analyzer import (
+    DEFAULT_MODEL,
+    ModelNotInstalledError,
+    chunk_text,
+    count_lemmas,
+    download_model,
+    installed_models,
+    load_model,
+    top_words,
+)
 from core.anki import AnkiClient, AnkiError, AnkiUnavailableError
 from core.reader import SUPPORTED_SUFFIXES, extract_text
 from core.translator import PROVIDERS, Translator
@@ -106,6 +115,36 @@ def load_sample() -> None:
     refresh_table()
 
 
+def refresh_models() -> None:
+    models = installed_models()
+    spacy_model_select.options = models
+    if not spacy_model_select.value or spacy_model_select.value not in models:
+        spacy_model_select.value = DEFAULT_MODEL if DEFAULT_MODEL in models else (models[0] if models else DEFAULT_MODEL)
+    spacy_model_select.update()
+    log(f"Installed spaCy models: {models or 'none'}")
+
+
+async def do_download_model() -> None:
+    name = (spacy_model_select.value or "").strip()
+    if not name:
+        ui.notify("Enter a model name first (e.g. fr_core_news_sm).", type="warning")
+        return
+    set_busy(True)
+    log(f"Downloading spaCy model {name!r} (python -m spacy download {name})...")
+    try:
+        output = await run.io_bound(download_model, name)
+        log("Download finished. " + output.strip().splitlines()[-1] if output.strip() else "Download finished.")
+        refresh_models()
+        spacy_model_select.value = name
+        spacy_model_select.update()
+        ui.notify(f"Model {name} installed", type="positive")
+    except Exception as exc:
+        log(f"Model download failed: {exc}")
+        ui.notify(f"Download failed: {exc}", type="negative", timeout=10000)
+    finally:
+        set_busy(False)
+
+
 async def do_analyze() -> None:
     if not state.text:
         ui.notify("Upload an eBook or load the sample text first.", type="warning")
@@ -114,12 +153,21 @@ async def do_analyze() -> None:
     log("Analyzing text (tokenize + lemmatize with spaCy)...")
     progress.value = 0
     try:
+        model_name = (spacy_model_select.value or DEFAULT_MODEL).strip()
+        try:
+            nlp = await run.io_bound(load_model, model_name)
+        except ModelNotInstalledError as exc:
+            log(str(exc))
+            ui.notify(f"Model {model_name!r} not installed — use 'Download model' above.", type="warning", timeout=10000)
+            return
+        log(f"Using spaCy model {model_name!r}")
         counter: Counter = Counter()
         chunks = list(chunk_text(state.text))
         for i, chunk in enumerate(chunks):
             part = await run.io_bound(
                 count_lemmas,
                 chunk,
+                nlp=nlp,
                 drop_propn=drop_propn.value,
                 drop_stopwords=drop_stop.value,
                 min_len=int(min_len.value or 2),
@@ -332,6 +380,11 @@ with ui.row().classes("w-full gap-4 items-start"):
 
         ui.separator()
         ui.label("2 · Analysis").classes("text-lg font-semibold")
+        spacy_model_select = ui.select([], label="spaCy model", with_input=True).classes("w-full")
+        with ui.row().classes("w-full"):
+            ui.button("Refresh models", on_click=refresh_models).props("outline size=sm")
+            ui.button("Download model", on_click=do_download_model).props("outline size=sm")
+        ui.label("Model is downloaded/loaded on demand; the app starts fine without one.").classes("text-xs opacity-60")
         drop_propn = ui.checkbox("Drop proper nouns (names)", value=True)
         drop_stop = ui.checkbox("Drop stopwords (the, and, ...)", value=False)
         with ui.row().classes("w-full"):
@@ -388,5 +441,5 @@ with ui.row().classes("w-full gap-4 items-start"):
 ui.dark_mode(True)
 
 if __name__ in {"__main__", "__mp_main__"}:
-    get_nlp()  # load spaCy model once at startup
+    refresh_models()
     ui.run(title="eBook → Anki Vocabulary Builder", host="127.0.0.1", port=8080, show=False, reload=False)

@@ -5,7 +5,14 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from core.analyzer import count_lemmas, top_words
+from core.analyzer import (
+    DEFAULT_MODEL,
+    ModelNotInstalledError,
+    count_lemmas,
+    installed_models,
+    load_model,
+    top_words,
+)
 from core.anki import AnkiClient, AnkiUnavailableError
 from core.reader import extract_text
 from core.translator import Translator
@@ -116,6 +123,22 @@ def test_analyzer():
     print("analyzer OK | run count:", counter["run"], "| top:", top[:5])
 
 
+def test_models():
+    models = installed_models()
+    assert DEFAULT_MODEL in models, models
+    nlp = load_model(DEFAULT_MODEL)
+    assert nlp("running").__iter__  # loads and caches
+    assert load_model(DEFAULT_MODEL) is nlp  # cached
+    try:
+        load_model("definitely_not_a_real_model_xyz")
+        raise AssertionError("missing model should raise")
+    except ModelNotInstalledError as exc:
+        assert "python -m spacy download" in str(exc)
+    counter = count_lemmas("He runs and ran.", nlp=nlp)
+    assert counter["run"] == 2
+    print("models OK | installed:", models)
+
+
 def test_translator():
     # Live Google endpoint is IP-rate-limited from this sandbox; verify logic with a stub.
     tr = Translator.__new__(Translator)
@@ -177,6 +200,7 @@ async def test_anki():
 if __name__ == "__main__":
     test_reader()
     test_analyzer()
+    test_models()
     test_translator()
     asyncio.run(test_anki())
     print("ALL CORE TESTS PASSED")

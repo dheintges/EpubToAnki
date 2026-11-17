@@ -19,8 +19,16 @@ Pipeline:
 
 ```bash
 pip install -r requirements.txt
-python -m spacy download en_core_web_sm
+python -m spacy download en_core_web_sm   # optional: the GUI can download models too
 ```
+
+The app starts fine **without** any spaCy model installed — models are loaded
+lazily, only when you press *Analyze*. In the GUI (section **2 · Analysis**) you
+can pick any installed model or type a model name (e.g. `fr_core_news_sm` for
+French, `de_core_news_sm` for German) and press **Download model** to install it
+(`python -m spacy download <model>` runs in the background), then **Refresh
+models** to see it. If the selected model is missing, Analyze shows a warning
+instead of crashing.
 
 ## Run
 
@@ -62,6 +70,7 @@ core/anki.py         async AnkiConnect client (find, check, add notes)
 - The free Google provider uses the unofficial endpoint behind `deep-translator` and
   may rate-limit on very large word lists; the app retries and continues on errors.
   For production-quality translation, use the `deepl` provider with your API key.
-- spaCy's English model is used for lemmatization. For other source languages,
-  download the matching model (e.g. `de_core_news_sm`) and adjust
-  `core/analyzer.py:get_nlp`.
+- Lemmatization uses the spaCy model selected in the GUI (default
+  `en_core_web_sm`). For other source languages, download the matching model in
+  the GUI — e.g. `fr_core_news_sm` for French — and set the source language
+  accordingly. Model names follow the pattern `<lang>_core_news_sm`.
